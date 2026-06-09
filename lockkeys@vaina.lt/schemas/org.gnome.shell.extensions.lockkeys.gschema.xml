@@ -53,5 +53,29 @@
 			<description>Set to 'never' to never show the num-lock indicator, 'when-active' to show it only when
 				num-lock is active, or 'always' to always show the indicator</description>
 		</key>
+
+		<!-- Fn Lock Keys -->
+		<key name="fnlock-enabled" type="b">
+			<default>true</default>
+			<summary>Enable fn-lock indicator</summary>
+			<description>Set false to disable fn-lock indicator entirely</description>
+		</key>
+		<key name="fnlock-notification" type="s">
+			<default>'osd'</default>
+			<summary>Fn-lock notification style</summary>
+			<description>Set to 'off' to disable fn-lock notifications, 'compact' for
+				compact notifications, or 'osd' for on-screen display notifications</description>
+		</key>
+		<key name="fnlock-indicator" type="s">
+			<default>'when-active'</default>
+			<summary>Fn-lock indicator display mode</summary>
+			<description>Set to 'never' to never show the fn-lock indicator, 'when-active' to show it only when
+				fn-lock is active, or 'always' to always show the indicator</description>
+		</key>
+		<key name="fnlock-sysfs-path" type="s">
+			<default>'/sys/class/leds/platform::fnlock/brightness'</default>
+			<summary>Fn-lock sysfs brightness path</summary>
+			<description>Path to the sysfs LED brightness file that reports fn-lock state (0=off, 1=on)</description>
+		</key>
 	</schema>
 </schemalist>

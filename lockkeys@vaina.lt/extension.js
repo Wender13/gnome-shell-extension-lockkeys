@@ -1,5 +1,6 @@
 import St from 'gi://St';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 
@@ -64,9 +65,13 @@ const LockKeysIndicator = GObject.registerClass({
         this.capsIcon = new St.Icon({
             style_class: 'system-status-icon lockkeys-status-icon'
         });
+        this.fnIcon = new St.Icon({
+            style_class: 'system-status-icon lockkeys-status-icon'
+        });
 
         this.numIcon.set_style('padding-right: 0px; padding-left: 0px;');
         this.capsIcon.set_style('padding-right: 0px; padding-left: 0px;');
+        this.fnIcon.set_style('padding-right: 0px; padding-left: 0px;');
 
         let layoutManager = new St.BoxLayout({
             vertical: false,
@@ -74,6 +79,7 @@ const LockKeysIndicator = GObject.registerClass({
         });
         layoutManager.add_child(this.numIcon);
         layoutManager.add_child(this.capsIcon);
+        layoutManager.add_child(this.fnIcon);
         this.add_child(layoutManager);
 
         this.numMenuItem = new PopupMenu.PopupSwitchMenuItem(_("Num Lock"), false, { reactive: false });
@@ -82,9 +88,15 @@ const LockKeysIndicator = GObject.registerClass({
         this.capsMenuItem = new PopupMenu.PopupSwitchMenuItem(_("Caps Lock"), false, { reactive: false });
         this.menu.addMenuItem(this.capsMenuItem);
 
+        this.fnMenuItem = new PopupMenu.PopupSwitchMenuItem(_("Fn Lock"), false, { reactive: false });
+        this.menu.addMenuItem(this.fnMenuItem);
+
         this.a11ySettings = new Gio.Settings({
             schema: 'org.gnome.desktop.a11y.interface'
         });
+
+        this.fnlock_state = null;
+        this._fnLockPollId = 0;
 
         this.updateSwitchOpacity();
         this._highContrastChangedId = this.a11ySettings.connect('changed::high-contrast', () => {
@@ -105,9 +117,10 @@ const LockKeysIndicator = GObject.registerClass({
     updateSwitchOpacity() {
         const isHighContrast = this.a11ySettings.get_boolean('high-contrast');
         const disabledOpacity = isHighContrast ? 0.4 : 0.5;
-        
+
         this.numMenuItem._switch.set_opacity(disabledOpacity * 255);
         this.capsMenuItem._switch.set_opacity(disabledOpacity * 255);
+        this.fnMenuItem._switch.set_opacity(disabledOpacity * 255);
     }
 
 	setActive(enabled) {
@@ -115,6 +128,8 @@ const LockKeysIndicator = GObject.registerClass({
 			this._keyboardStateChangedId = this.keyMap.connect('state-changed', this.handleStateChange.bind(this));
            	this._settingsChangedId = this.config.settings.connect('changed', this.handleSettingsChange.bind(this));
            	this._iconThemeChangedId = this.icons.iconTheme.connect('changed', this.handleSettingsChange.bind(this));
+            this.fnlock_state = this._readFnLockState();
+            this._fnLockPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, this._pollFnLock.bind(this));
            	this.handleSettingsChange();
 		} else {
 			this.keyMap.disconnect(this._keyboardStateChangedId);
@@ -126,6 +141,10 @@ const LockKeysIndicator = GObject.registerClass({
             if (this._highContrastChangedId) {
                 this.a11ySettings.disconnect(this._highContrastChangedId);
                 this._highContrastChangedId = 0;
+            }
+            if (this._fnLockPollId) {
+                GLib.source_remove(this._fnLockPollId);
+                this._fnLockPollId = 0;
             }
 		}
 	}
@@ -167,6 +186,57 @@ const LockKeysIndicator = GObject.registerClass({
 		this.indicatorStyle.displayState(this.numlock_state, this.capslock_state);
 		this.numMenuItem.setToggleState(this.numlock_state);
 		this.capsMenuItem.setToggleState(this.capslock_state);
+		this._updateFnlockDisplay();
+	}
+
+	_readFnLockState() {
+		const path = this.config.getFnlockSysfsPath();
+		if (!path) return null;
+		try {
+			const file = Gio.File.new_for_path(path);
+			const [ok, contents] = file.load_contents(null);
+			if (ok)
+				return parseInt(new TextDecoder().decode(contents).trim()) !== 0;
+		} catch (e) {}
+		return null;
+	}
+
+	_pollFnLock() {
+		const newState = this._readFnLockState();
+		if (newState !== null && newState !== this.fnlock_state) {
+			if (this.config.getFnlockNotification() !== NOTIFICATION_OFF) {
+				let icon_name = newState ? 'fnlock-enabled-symbolic' : 'fnlock-disabled-symbolic';
+				let notification_text = _("Fn Lock") + ' ' + this.getStateText(newState);
+				this.showFnlockNotification(notification_text, icon_name);
+			}
+			this.fnlock_state = newState;
+			this._updateFnlockDisplay();
+		}
+		return GLib.SOURCE_CONTINUE;
+	}
+
+	_updateFnlockDisplay() {
+		const indicator = this.config.getFnlockIndicator();
+		const state = this.fnlock_state || false;
+
+		if (indicator === VISIBILITY_NEVER) {
+			this.fnIcon.hide();
+		} else if (indicator === VISIBILITY_WHEN_ACTIVE) {
+			if (state) {
+				this.fnIcon.show();
+				this.fnIcon.set_gicon(this.icons.getCustomIcon('fnlock-enabled-symbolic'));
+			} else {
+				this.fnIcon.hide();
+			}
+		} else if (indicator === VISIBILITY_ALWAYS) {
+			this.fnIcon.show();
+			this.fnIcon.set_gicon(this.icons.getCustomIcon(
+				state ? 'fnlock-enabled-symbolic' : 'fnlock-disabled-symbolic'
+			));
+		}
+
+		this.fnMenuItem.setToggleState(state);
+		this.visible = (this.numIcon.visible || this.capsIcon.visible || this.fnIcon.visible);
 	}
 
 	showNumlockNotification(notification_text, icon_name) {
@@ -197,6 +267,22 @@ const LockKeysIndicator = GObject.registerClass({
 				this.showSimpleNotification(notification_text, icon_name, '_capslockSource');
 			} else {
 				this.showSimpleNotification45(notification_text, icon_name, '_capslockSource');
+			}
+		}
+	}
+
+	showFnlockNotification(notification_text, icon_name) {
+		if (this.config.getFnlockNotification() === NOTIFICATION_OSD) {
+			if (POST_49) {
+				Main.osdWindowManager.showAll(this.icons.getCustomIcon(icon_name), notification_text);
+			} else {
+				Main.osdWindowManager.show(-1, this.icons.getCustomIcon(icon_name), notification_text);
+			}
+		} else if (this.config.getFnlockNotification() === NOTIFICATION_COMPACT) {
+			if (POST_46) {
+				this.showSimpleNotification(notification_text, icon_name);
+			} else {
+				this.showSimpleNotification45(notification_text, icon_name);
 			}
 		}
 	}
@@ -474,5 +560,17 @@ const Configuration = GObject.registerClass({
 
 	getNumlockIndicator() {
 		return this.settings.get_string('numlock-indicator');
+	}
+
+	getFnlockNotification() {
+		return this.settings.get_string('fnlock-notification');
+	}
+
+	getFnlockIndicator() {
+		return this.settings.get_string('fnlock-indicator');
+	}
+
+	getFnlockSysfsPath() {
+		return this.settings.get_string('fnlock-sysfs-path');
 	}
 });

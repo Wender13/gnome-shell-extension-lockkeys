@@ -60,9 +60,16 @@ export default class LockKeysPreferences extends ExtensionPreferences {
 
         numlockGroup.add(this.buildNumLockPrefsWidget());
 
+        const fnlockGroup = new Adw.PreferencesGroup({
+            title: _('Fn Lock'),
+            description: _('Options for Fn Lock key'),
+        });
+        fnlockGroup.add(this.buildFnLockPrefsWidget());
+
         const page = new Adw.PreferencesPage();
         page.add(capsGroup);
         page.add(numlockGroup);
+        page.add(fnlockGroup);
 
         window.add(page);
     }
@@ -123,6 +130,53 @@ export default class LockKeysPreferences extends ExtensionPreferences {
             }
         );
         widget.append(numlockIndicator);
+
+        return this.createVerticalBoxCompat(widget);
+    }
+
+    buildFnLockPrefsWidget() {
+        const widget = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 10 });
+
+        const fnlockNotification = this.createToggleGroup(
+            'fnlock-notification',
+            _('Notifications'),
+            _('Show notifications when Fn Lock state changes'),
+            {
+                'off': _('Off'),
+                'compact': _('Compact'),
+                'osd': _('Osd')
+            }
+        );
+        widget.append(fnlockNotification);
+
+        const fnlockIndicator = this.createToggleGroup(
+            'fnlock-indicator',
+            _('Top Bar Indicator'),
+            _('Show Fn Lock indicator in the top bar'),
+            {
+                'never': _('Never'),
+                'when-active': _('When Active'),
+                'always': _('Always')
+            }
+        );
+        widget.append(fnlockIndicator);
+
+        const pathLabel = new Gtk.Label({
+            label: _('Sysfs Path'),
+            xalign: 0,
+            tooltip_text: _('Path to the fn-lock LED brightness file (0=off, 1=on)')
+        });
+        pathLabel.set_hexpand(true);
+        const pathEntry = new Gtk.Entry({
+            text: this.getSettings().get_string('fnlock-sysfs-path'),
+            halign: Gtk.Align.END,
+            hexpand: true
+        });
+        const _settings = this.getSettings();
+        pathEntry.connect('changed', (entry) => {
+            _settings.set_string('fnlock-sysfs-path', entry.get_text());
+        });
+        widget.append(this.createHorizontalBoxCompat(pathLabel, pathEntry, false));
 
         return this.createVerticalBoxCompat(widget);
     }
